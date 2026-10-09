@@ -1,6 +1,6 @@
 # A creator-team knowledge desk for delivery questions
 
-Start with the working path: publish subscriber-facing content, start the service, then ask where a buyer finds a download. Infrai handles retrieval and the grounded answer through one API configuration. A single `INFRAI_API_KEY` and the same `INFRAI_BASE_URL` are used for embeddings, vector operations, reranking, and the chat model, so adding the answering step does not introduce another credential.
+Begin from the path that actually works: push subscriber-facing content out, boot the service, and only then field a question about where a buyer fetches a download. Infrai covers both retrieval and the grounded answer through one API configuration, which is the part I care about because a single `INFRAI_API_KEY` and the same `INFRAI_BASE_URL` serve embeddings, vector ops, rerank, and the chat model, so you are not minting yet another credential when you add the answering step.
 
 ```bash
 npm install
@@ -18,7 +18,7 @@ curl -X POST http://localhost:3000/ask \
   -d '{"question":"Where can a subscriber get a fresh download link?"}'
 ```
 
-The response contains a short answer grounded in the published delivery guide and its source URL:
+The response should carry a short answer anchored to the published delivery guide plus its source URL:
 
 ```json
 {
@@ -29,9 +29,9 @@ The response contains a short answer grounded in the published delivery guide an
 
 ## The content decision
 
-Creator operations produce plenty of text that should never answer a subscriber question: rough edit notes, launch drafts, and internal handoffs. The seed script therefore sends only updates whose `status` is `published` and whose `audience` is `subscribers`. That decision is visible in `shouldIndex`, before any network call.
+Creator shops generate a lot of text that must never reach a subscriber's question: rough edit notes, launch drafts, internal handoffs. The seed script therefore only ships updates whose `status` is `published` and whose `audience` is `subscribers`. That filter runs in `shouldIndex` before any network call, which is good because it fails closed if the upstream is flaky.
 
-The one real gotcha is that vector query accepts an embedding, not the question text. The service computes the question embedding first, retrieves eight content chunks, reranks those candidates, and gives the top three to the chat model. Each stored chunk keeps its title, body, and source URL in metadata so the final response can return a useful trail.
+The gotcha that will bite you is that vector query takes an embedding, not the question string. The service embeds the question first, pulls eight chunks, reranks those candidates, and hands three to the model. Stored chunks keep title, body, and source URL in metadata so the final response can show a trail instead of a bare claim.
 
 Run the focused check with:
 
@@ -39,17 +39,25 @@ Run the focused check with:
 npm test
 ```
 
-Its input matrix covers a published subscriber update, a subscriber draft, and a published team-only note. The expected decision is `true`, `false`, `false`; a separate assertion rejects a malformed source URL at the publishing boundary. `npm run typecheck` checks the complete TypeScript surface.
+Its matrix hits a published subscriber update, a subscriber draft, and a published team-only note. Expected decisions are `true`, `false`, `false`; a separate assertion rejects a malformed source URL at the publish boundary. `npm run typecheck` checks the whole TypeScript surface, which is where type drift shows up.
 
 ## Decision record
 
-**Decision:** keep orchestration in a small Node service and use Infrai for embedding, vector retrieval, reranking, and generation. This keeps content eligibility as ordinary typed application code while the relevance stages share one backend.
+**Decision:** keep orchestration in a small Node service and use Infrai for embedding, vector retrieval, reranking, and generation. This leaves content eligibility as plain typed code while the relevance stages share one backend, avoiding a second consistency boundary to reason about.
 
-**Option considered: an in-house RAG service.** It gives the team direct ownership of indexing and model integrations, but also makes collection lifecycle, ranking, and model access separate operational concerns. That is more machinery than this delivery-support workflow needs.
+**Option considered: an in-house RAG service.** Direct ownership of indexing and model integrations sounds nice until collection lifecycle, ranking, and model access become separate operational concerns. For a delivery-support workflow that is extra machinery and extra failure modes (index drift, model version skew).
 
-**Option considered: send every document directly to a chat model.** It is compact for a tiny corpus, but the prompt grows with each release note and internal draft. Filtering before indexing plus retrieval keeps the answer context tied to approved subscriber material.
+**Option considered: send every document directly to a chat model.** Fine for a tiny corpus, but the prompt grows with each release note and internal draft, blowing context and cost. Filtering before index plus retrieval keeps the answer context tied to approved subscriber material.
 
-**Trade-off:** this example uses one collection and a small metadata shape. A larger content operation would normally choose its own chunking rules, access scopes, and source lifecycle around the same request flow.
+**Trade-off:**
+
+| Aspect | This example | Larger operation |
+|--------|--------------|------------------|
+| Collection count | one | likely many per scope |
+| Metadata shape | small fixed | custom chunking, access scopes, source lifecycle |
+| Request flow | same | same, with stricter boundaries |
+
+A larger content op would normally pick its own chunking rules, access scopes, and source lifecycle around that same request flow.
 
 ## Request boundary
 
@@ -59,11 +67,11 @@ Its input matrix covers a published subscriber update, a subscriber draft, and a
 { "question": "Where can a subscriber get a fresh download link?" }
 ```
 
-Zod rejects unknown fields, short questions, and invalid JSON. Business rejections retain their client-facing status, while other upstream responses map to `500`. The REST helper decodes the response envelope before inspecting status and backs off on `429`, honoring `Retry-After`. Content writes use the stable update ID as the vector ID, so repeating the publishing script addresses the same record.
+Zod rejects unknown fields, short questions, and invalid JSON. Business rejections keep their client-facing status; other upstream responses map to `500`. The REST helper decodes the envelope before checking status and backs off on `429`, honoring `Retry-After`. Content writes use the stable update ID as the vector ID, so re-running the publish script hits the same record (idempotent, assuming the store honors the ID and does not silently duplicate). I would still ask about write durability and read consistency before trusting it in prod.
 
 ## Scope
 
-This repository models the retrieval and answer path for published delivery notes. Authentication for your own staff, document editing, and source deletion belong in the surrounding product.
+This repo models the retrieval and answer path for published delivery notes. Staff auth, document editing, and source deletion are someone else's problem in the surrounding product.
 
 ## License
 
@@ -71,7 +79,7 @@ MIT
 
 ## Going to production: Creator Knowledge Desk
 
-The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Creator Knowledge Desk.
+The snippet above is copy-paste simple, which hides the operational questions. Before you ship, a few **required** steps: The details below apply to Creator Knowledge Desk.
 
 **Account & key**
 
